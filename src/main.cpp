@@ -31,29 +31,26 @@ const char* password =  "ynoviotmaster";
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
-String getCurrentFrequencyInHz(){
-  return "375Hz"; 
-}
-
-String getRandomInstruction(){
-  String arrayNum[2] = {"up  ", "down"};
-  int RandIndex = rand() % 2;
-  return arrayNum[RandIndex];
-}
-
 void displayFixedTextOnFirstLcdLine(){
   lcd.setCursor(0, 0);
   lcd.print("Note ");
 }
 
 void displayDataOnLcdDisplay(String currentFullNoteName, String currentFrequency, String instruction){
-  displayFixedTextOnFirstLcdLine();
-  lcd.setCursor(5, 0);
-  lcd.print(currentFullNoteName.c_str());
-  lcd.setCursor(8, 0);
-  lcd.print(currentFrequency + "Hz");
-  lcd.setCursor(0, 1);
-  lcd.print(instruction);
+  if (!currentFrequency)
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("No data ...");
+  } else {
+    displayFixedTextOnFirstLcdLine();
+    lcd.setCursor(5, 0);
+    lcd.print(currentFullNoteName.c_str());
+    lcd.setCursor(8, 0);
+    lcd.print(currentFrequency + "Hz ");
+    lcd.setCursor(0, 1);
+    lcd.print(instruction);
+  }
 }
   
 void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
@@ -142,7 +139,7 @@ void loop(){
   note6.offset = 10;
 
   invalidNote.letter = 'Z';
-  invalidNote.frequency = 999;
+  invalidNote.frequency = 9999;
   invalidNote.octave = 10;
   invalidNote.offset = 10;
 
@@ -153,10 +150,13 @@ void loop(){
   standard.invalidNote = invalidNote;
 
   double peak = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
-  double roundedPeak = round(peak);
+  float recalibrateFrequency = peak - 1.5;
+  double roundedPeak = round(recalibrateFrequency);
 
   char roundedPeakStr[64];
   snprintf(roundedPeakStr, sizeof(roundedPeakStr), "%g", roundedPeak);
+
+  bool isPeakAroundNote = standard.isValidNote(roundedPeak);
 
   Note closestNote = standard.getClosestNote(roundedPeak);
 
@@ -166,15 +166,12 @@ void loop(){
   char closestNoteFrequencyStr[64];
   snprintf(closestNoteFrequencyStr, sizeof(closestNoteFrequencyStr), "%g", closestNote.frequency);
 
-  String instruction = standard.getInstruction(roundedPeak, closestNote.frequency).c_str();
+  string formatedInstruction = standard.getFormatedInstruction(roundedPeak, closestNote.frequency);
+  string formatedInstructionForLCD = standard.getInstructionForLCD(roundedPeak, closestNote.frequency);
 
-  displayDataOnLcdDisplay(closestNote.getFullName().c_str(), roundedPeakStr, instruction);
+  displayDataOnLcdDisplay(closestNote.getFullName().c_str(), roundedPeakStr, formatedInstructionForLCD.c_str());
 
-  Serial.println(closestNoteFullNameStr);
-
-  String analyzedNoteData = "{frequency: " + String(roundedPeak) + ", closestNote: " + closestNote.getFullName().c_str() + ", instruction: " + instruction + '}';
-
-  // String all = String(roundedPeak) + " " + closestNote.getFullName().c_str() + " " + instruction;
+  String analyzedNoteData = "{\"frequency\": " + String(roundedPeak) + ", \"closestNote\": \"" + closestNote.getFullName().c_str() + "\", \"instruction\": \"" + formatedInstruction.c_str() + "\"}";
 
   ws.textAll(analyzedNoteData);
 
