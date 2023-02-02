@@ -1,12 +1,16 @@
 #include "arduinoFFT.h"
 #include <Arduino.h>
+#include "./models/Note.hpp"
+#include "./models/Tuning.hpp"
+#include <string>
+#include <LiquidCrystal_I2C.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
-
+#include <math.h>
 #include <AsyncTCP.h>
-
 #include <cstdlib> 
 #include <ctime>
+using namespace std;
   
 #define SAMPLES 128             //SAMPLES-pt FFT. Must be a base 2 number. Max 128 for Arduino Uno.
 #define SAMPLING_FREQUENCY 1024 //Ts = Based on Nyquist, must be 2 times the highest expected frequency.
@@ -19,12 +23,36 @@ unsigned long microSeconds;
 double vReal[SAMPLES]; //create vector of size SAMPLES to hold real values
 double vImag[SAMPLES]; //create vector of size SAMPLES to hold imaginary values
 
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
+
 const char* ssid = "Nokia3310";
 const char* password =  "ynoviotmaster";
-
+  
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
 
+void displayFixedTextOnFirstLcdLine(){
+  lcd.setCursor(0, 0);
+  lcd.print("Note ");
+}
+
+void displayDataOnLcdDisplay(String currentFullNoteName, String currentFrequency, String instruction){
+  if (!currentFrequency)
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("No data ...");
+  } else {
+    displayFixedTextOnFirstLcdLine();
+    lcd.setCursor(5, 0);
+    lcd.print(currentFullNoteName.c_str());
+    lcd.setCursor(8, 0);
+    lcd.print(currentFrequency + "Hz ");
+    lcd.setCursor(0, 1);
+    lcd.print(instruction);
+  }
+}
+  
 void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
   
   if(type == WS_EVT_CONNECT){
@@ -40,6 +68,10 @@ void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventT
   
 void setup(){
   Serial.begin(115200);
+  // initialize LCD
+  lcd.init();
+  // turn on LCD backlight                      
+  lcd.backlight();
   
   WiFi.begin(ssid, password);
   
@@ -76,13 +108,72 @@ void loop(){
   FFT.Compute(vReal, vImag, SAMPLES, FFT_FORWARD);
   FFT.ComplexToMagnitude(vReal, vImag, SAMPLES);
 
+  note1.letter = 'E';
+  note1.frequency = 82.41;
+  note1.octave = 2;
+  note1.offset = 10;
+
+  note2.letter = 'A';
+  note2.frequency = 110;
+  note2.octave = 2;
+  note2.offset = 10;
+
+  note3.letter = 'D';
+  note3.frequency = 146.83;
+  note3.octave = 3;
+  note3.offset = 10;
+
+  note4.letter = 'G';
+  note4.frequency = 196;
+  note4.octave = 3;
+  note4.offset = 10;
+
+  note5.letter = 'B';
+  note5.frequency = 246.94;
+  note5.octave = 3;
+  note5.offset = 10;
+
+  note6.letter = 'E';
+  note6.frequency = 329.63;
+  note6.octave = 4;
+  note6.offset = 10;
+
+  invalidNote.letter = 'Z';
+  invalidNote.frequency = 9999;
+  invalidNote.octave = 10;
+  invalidNote.offset = 10;
+
+  standard.name = "Standard";
+  standard.notes = {{
+    note1, note2, note3, note4, note5, note6
+  }};
+  standard.invalidNote = invalidNote;
+
   double peak = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
-  Serial.println(peak);
+  float recalibrateFrequency = peak - 1.5;
+  double roundedPeak = round(recalibrateFrequency);
 
-  char str[64];
-  snprintf(str, sizeof(str), "%g", peak);
+  char roundedPeakStr[64];
+  snprintf(roundedPeakStr, sizeof(roundedPeakStr), "%g", roundedPeak);
 
-  Serial.print(str);
-  ws.textAll(str);
+  bool isPeakAroundNote = standard.isValidNote(roundedPeak);
+
+  Note closestNote = standard.getClosestNote(roundedPeak);
+
+  char closestNoteFullNameStr[64];
+  snprintf(closestNoteFullNameStr, sizeof(closestNoteFullNameStr), "%g", closestNote.getFullName());
+
+  char closestNoteFrequencyStr[64];
+  snprintf(closestNoteFrequencyStr, sizeof(closestNoteFrequencyStr), "%g", closestNote.frequency);
+
+  string formatedInstruction = standard.getFormatedInstruction(roundedPeak, closestNote.frequency);
+  string formatedInstructionForLCD = standard.getInstructionForLCD(roundedPeak, closestNote.frequency);
+
+  displayDataOnLcdDisplay(closestNote.getFullName().c_str(), roundedPeakStr, formatedInstructionForLCD.c_str());
+
+  String analyzedNoteData = "{\"frequency\": " + String(roundedPeak) + ", \"closestNote\": \"" + closestNote.getFullName().c_str() + "\", \"instruction\": \"" + formatedInstruction.c_str() + "\"}";
+
+  ws.textAll(analyzedNoteData);
+
   delay(40); //do one time
 }
