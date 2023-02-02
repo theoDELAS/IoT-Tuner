@@ -1,282 +1,179 @@
-#include <Wire.h>
+#include "arduinoFFT.h"
+#include <Arduino.h>
+#include "./models/Note.hpp"
+#include "./models/Tuning.hpp"
+#include <string>
 #include <LiquidCrystal_I2C.h>
 #include <WiFi.h>
-#include <AsyncTCP.h>
 #include <ESPAsyncWebServer.h>
-
+#include <math.h>
+#include <AsyncTCP.h>
 #include <cstdlib> 
 #include <ctime>
+using namespace std;
+  
+#define SAMPLES 128             //SAMPLES-pt FFT. Must be a base 2 number. Max 128 for Arduino Uno.
+#define SAMPLING_FREQUENCY 1024 //Ts = Based on Nyquist, must be 2 times the highest expected frequency.
+ 
+arduinoFFT FFT = arduinoFFT();
+ 
+unsigned int samplingPeriod;
+unsigned long microSeconds;
+ 
+double vReal[SAMPLES]; //create vector of size SAMPLES to hold real values
+double vImag[SAMPLES]; //create vector of size SAMPLES to hold imaginary values
 
 LiquidCrystal_I2C lcd(0x27, 16, 2); 
 
 const char* ssid = "Nokia3310";
-const char* password = "ynoviotmaster";
-
-bool ledState = 0;
-const int ledPin = 2;
-
-// Create AsyncWebServer object on port 80
+const char* password =  "ynoviotmaster";
+  
 AsyncWebServer server(80);
 AsyncWebSocket ws("/ws");
-
-char getCurrentTone(){
-  char arrayNum[5] = {'E', 'B', 'G', 'D', 'A'};
-  int RandIndex = rand() % 5;
-  return arrayNum[RandIndex];
-}
-
-String getCurrentFrequencyInHz(){
-  return "375Hz"; 
-}
-
-String getInstruction(){
-  String arrayNum[2] = {"up  ", "down"};
-  int RandIndex = rand() % 2;
-  return arrayNum[RandIndex];
-}
-
-String getRateInHz(){
-  String arrayNum[10] = {"10Hz  ", "78Hz  ", "132Hz  ", "187Hz  ", "199Hz  ", "204Hz  ", "286Hz  ", "361Hz  ", "429Hz  ", "559Hz  "};
-  int RandIndex = rand() % 10;
-  return arrayNum[RandIndex];
-}
-
-void displayRateInHz(){
-  lcd.setCursor(9, 0);
-  lcd.print(getRateInHz());
-}
 
 void displayFixedTextOnFirstLcdLine(){
   lcd.setCursor(0, 0);
   lcd.print("Note ");
 }
 
-void displayFixedTextOnSecondLcdLine(){
-  lcd.setCursor(0, 1);
-  lcd.print("Please try ");
-}
-
-const char index_html[] PROGMEM = R"rawliteral(
-<!DOCTYPE HTML><html>
-<head>
-  <title>ESP Web Server</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <link rel="icon" href="data:,">
-  <style>
-  html {
-    font-family: Arial, Helvetica, sans-serif;
-    text-align: center;
-  }
-  h1 {
-    font-size: 1.8rem;
-    color: white;
-  }
-  h2{
-    font-size: 1.5rem;
-    font-weight: bold;
-    color: #143642;
-  }
-  .topnav {
-    overflow: hidden;
-    background-color: #143642;
-  }
-  body {
-    margin: 0;
-  }
-  .content {
-    padding: 30px;
-    max-width: 600px;
-    margin: 0 auto;
-  }
-  .card {
-    background-color: #F8F7F9;;
-    box-shadow: 2px 2px 12px 1px rgba(140,140,140,.5);
-    padding-top:10px;
-    padding-bottom:20px;
-  }
-  .button {
-    padding: 15px 50px;
-    font-size: 24px;
-    text-align: center;
-    outline: none;
-    color: #fff;
-    background-color: #0f8b8d;
-    border: none;
-    border-radius: 5px;
-    -webkit-touch-callout: none;
-    -webkit-user-select: none;
-    -khtml-user-select: none;
-    -moz-user-select: none;
-    -ms-user-select: none;
-    user-select: none;
-    -webkit-tap-highlight-color: rgba(0,0,0,0);
-   }
-   /*.button:hover {background-color: #0f8b8d}*/
-   .button:active {
-     background-color: #0f8b8d;
-     box-shadow: 2 2px #CDCDCD;
-     transform: translateY(2px);
-   }
-   .state {
-     font-size: 1.5rem;
-     color:#8c8c8c;
-     font-weight: bold;
-   }
-  </style>
-<title>ESP Web Server</title>
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="icon" href="data:,">
-</head>
-<body>
-  <div class="topnav">
-    <h1>ESP WebSocket Server</h1>
-  </div>
-  <div class="content">
-    <div class="card">
-      <h2>Output - GPIO 2</h2>
-      <p class="state">state: <span id="state">%STATE%</span></p>
-      <p><button id="button" class="button">Toggle</button></p>
-    </div>
-  </div>
-<script>
-  var gateway = `ws://${window.location.hostname}/ws`;
-  var websocket;
-  window.addEventListener('load', onLoad);
-  function initWebSocket() {
-    console.log('Trying to open a WebSocket connection...');
-    websocket = new WebSocket(gateway);
-    websocket.onopen    = onOpen;
-    websocket.onclose   = onClose;
-    websocket.onmessage = onMessage; // <-- add this line
-  }
-  function onOpen(event) {
-    console.log('Connection opened');
-  }
-  function onClose(event) {
-    console.log('Connection closed');
-    setTimeout(initWebSocket, 2000);
-  }
-  function onMessage(event) {
-    var state;
-    if (event.data == "1"){
-      state = "ON";
-    }
-    else{
-      state = "OFF";
-    }
-    document.getElementById('state').innerHTML = state;
-  }
-  function onLoad(event) {
-    initWebSocket();
-    initButton();
-  }
-  function initButton() {
-    document.getElementById('button').addEventListener('click', toggle);
-  }
-  function toggle(){
-    websocket.send('toggle');
-  }
-</script>
-</body>
-</html>
-)rawliteral";
-
-void notifyClients() {
-  ws.textAll(String(ledState));
-}
-
-void displayDataOnLcdDisplay(){
-  displayFixedTextOnFirstLcdLine();
-  displayFixedTextOnSecondLcdLine();
-  displayRateInHz();
-  lcd.setCursor(5, 0);
-  lcd.print(getCurrentTone());
-  lcd.setCursor(11, 1);
-  lcd.print(getInstruction());
-  notifyClients();
-}
-
-void handleWebSocketMessage(void *arg, uint8_t *data, size_t len) {
-  AwsFrameInfo *info = (AwsFrameInfo*)arg;
-  if (info->final && info->index == 0 && info->len == len && info->opcode == WS_TEXT) {
-    data[len] = 0;
-    if (strcmp((char*)data, "toggle") == 0) {
-      ledState = !ledState;
-      notifyClients();
-    }
+void displayDataOnLcdDisplay(String currentFullNoteName, String currentFrequency, String instruction){
+  if (!currentFrequency)
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("No data ...");
+  } else {
+    displayFixedTextOnFirstLcdLine();
+    lcd.setCursor(5, 0);
+    lcd.print(currentFullNoteName.c_str());
+    lcd.setCursor(8, 0);
+    lcd.print(currentFrequency + "Hz ");
+    lcd.setCursor(0, 1);
+    lcd.print(instruction);
   }
 }
-
-void onEvent(AsyncWebSocket *server, AsyncWebSocketClient *client, AwsEventType type,
-    void *arg, uint8_t *data, size_t len) {
-  switch (type) {
-    case WS_EVT_CONNECT:
-      Serial.printf("WebSocket client #%u connected from %s\n", client->id(), client->remoteIP().toString().c_str());
-      break;
-    case WS_EVT_DISCONNECT:
-      Serial.printf("WebSocket client #%u disconnected\n", client->id());
-      break;
-    case WS_EVT_DATA:
-      displayDataOnLcdDisplay();
-      break;
-    case WS_EVT_PONG:
-    case WS_EVT_ERROR:
-      break;
+  
+void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
+  
+  if(type == WS_EVT_CONNECT){
+  
+    Serial.println("Websocket client connection received");
+     
+  } else if(type == WS_EVT_DISCONNECT){
+ 
+    Serial.println("Client disconnected");
+  
   }
 }
-
-void initWebSocket() {
-  ws.onEvent(onEvent);
-  server.addHandler(&ws);
-}
-
-String processor(const String& var){
-  Serial.println(var);
-  if(var == "STATE"){
-    if (ledState){
-      return "ON";
-    }
-    else{
-      return "OFF";
-    }
-  }
-  return String();
-}
-
+  
 void setup(){
-  // Serial port for debugging purposes
   Serial.begin(115200);
-
-   // initialize LCD
+  // initialize LCD
   lcd.init();
   // turn on LCD backlight                      
   lcd.backlight();
-
-  pinMode(ledPin, OUTPUT);
-  digitalWrite(ledPin, LOW);
   
-  // Connect to Wi-Fi
   WiFi.begin(ssid, password);
+  
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
     Serial.println("Connecting to WiFi..");
   }
-
-  // Print ESP Local IP Address
+  
   Serial.println(WiFi.localIP());
-
-  initWebSocket();
-
-  // Route for root / web page
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send_P(200, "text/html", index_html, processor);
-  });
-
-  // Start server
+  
+  ws.onEvent(onWsEvent);
+  server.addHandler(&ws);
+  
   server.begin();
-}
 
+  samplingPeriod = round(1000000*(1.0/SAMPLING_FREQUENCY)); //Period in microseconds 
+}
+  
 void loop(){
-  ws.cleanupClients();
-  digitalWrite(ledPin, ledState);
+  for(int i=0; i<SAMPLES; i++)
+  {
+      microSeconds = micros(); 
+    
+      vReal[i] = analogRead(35);
+      vImag[i] = 0;
+
+      while(micros() < (microSeconds + samplingPeriod))
+      {
+        //do nothing
+      }
+  }
+
+  FFT.Windowing(vReal, SAMPLES, FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+  FFT.Compute(vReal, vImag, SAMPLES, FFT_FORWARD);
+  FFT.ComplexToMagnitude(vReal, vImag, SAMPLES);
+
+  note1.letter = 'E';
+  note1.frequency = 82.41;
+  note1.octave = 2;
+  note1.offset = 10;
+
+  note2.letter = 'A';
+  note2.frequency = 110;
+  note2.octave = 2;
+  note2.offset = 10;
+
+  note3.letter = 'D';
+  note3.frequency = 146.83;
+  note3.octave = 3;
+  note3.offset = 10;
+
+  note4.letter = 'G';
+  note4.frequency = 196;
+  note4.octave = 3;
+  note4.offset = 10;
+
+  note5.letter = 'B';
+  note5.frequency = 246.94;
+  note5.octave = 3;
+  note5.offset = 10;
+
+  note6.letter = 'E';
+  note6.frequency = 329.63;
+  note6.octave = 4;
+  note6.offset = 10;
+
+  invalidNote.letter = 'Z';
+  invalidNote.frequency = 9999;
+  invalidNote.octave = 10;
+  invalidNote.offset = 10;
+
+  standard.name = "Standard";
+  standard.notes = {{
+    note1, note2, note3, note4, note5, note6
+  }};
+  standard.invalidNote = invalidNote;
+
+  double peak = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
+  float recalibrateFrequency = peak - 1.5;
+  double roundedPeak = round(recalibrateFrequency);
+
+  char roundedPeakStr[64];
+  snprintf(roundedPeakStr, sizeof(roundedPeakStr), "%g", roundedPeak);
+
+  bool isPeakAroundNote = standard.isValidNote(roundedPeak);
+
+  Note closestNote = standard.getClosestNote(roundedPeak);
+
+  char closestNoteFullNameStr[64];
+  snprintf(closestNoteFullNameStr, sizeof(closestNoteFullNameStr), "%g", closestNote.getFullName());
+
+  char closestNoteFrequencyStr[64];
+  snprintf(closestNoteFrequencyStr, sizeof(closestNoteFrequencyStr), "%g", closestNote.frequency);
+
+  string formatedInstruction = standard.getFormatedInstruction(roundedPeak, closestNote.frequency);
+  string formatedInstructionForLCD = standard.getInstructionForLCD(roundedPeak, closestNote.frequency);
+
+  displayDataOnLcdDisplay(closestNote.getFullName().c_str(), roundedPeakStr, formatedInstructionForLCD.c_str());
+
+  String analyzedNoteData = "{\"frequency\": " + String(roundedPeak) + ", \"closestNote\": \"" + closestNote.getFullName().c_str() + "\", \"instruction\": \"" + formatedInstruction.c_str() + "\"}";
+
+  ws.textAll(analyzedNoteData);
+
+  delay(40); //do one time
 }
