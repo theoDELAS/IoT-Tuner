@@ -1,5 +1,8 @@
 #include "arduinoFFT.h"
 #include <Arduino.h>
+#include "./models/Note.hpp"
+#include "./models/Tuning.hpp"
+#include <string>
 #include <LiquidCrystal_I2C.h>
 #include <WiFi.h>
 #include <ESPAsyncWebServer.h>
@@ -7,6 +10,7 @@
 #include <AsyncTCP.h>
 #include <cstdlib> 
 #include <ctime>
+using namespace std;
   
 #define SAMPLES 128             //SAMPLES-pt FFT. Must be a base 2 number. Max 128 for Arduino Uno.
 #define SAMPLING_FREQUENCY 1024 //Ts = Based on Nyquist, must be 2 times the highest expected frequency.
@@ -42,19 +46,14 @@ void displayFixedTextOnFirstLcdLine(){
   lcd.print("Note ");
 }
 
-void displayFixedTextOnSecondLcdLine(){
-  lcd.setCursor(0, 1);
-  lcd.print("Please try ");
-}
-
-void displayDataOnLcdDisplay(String currentTone){
+void displayDataOnLcdDisplay(String currentFullNoteName, String currentFrequency, String instruction){
   displayFixedTextOnFirstLcdLine();
-  displayFixedTextOnSecondLcdLine();
-
   lcd.setCursor(5, 0);
-  lcd.print(currentTone + "Hz");
-  lcd.setCursor(11, 1);
-  lcd.print(getRandomInstruction());
+  lcd.print(currentFullNoteName.c_str());
+  lcd.setCursor(8, 0);
+  lcd.print(currentFrequency + "Hz");
+  lcd.setCursor(0, 1);
+  lcd.print(instruction);
 }
   
 void onWsEvent(AsyncWebSocket * server, AsyncWebSocketClient * client, AwsEventType type, void * arg, uint8_t *data, size_t len){
@@ -112,15 +111,72 @@ void loop(){
   FFT.Compute(vReal, vImag, SAMPLES, FFT_FORWARD);
   FFT.ComplexToMagnitude(vReal, vImag, SAMPLES);
 
+  note1.letter = 'E';
+  note1.frequency = 82.41;
+  note1.octave = 2;
+  note1.offset = 10;
+
+  note2.letter = 'A';
+  note2.frequency = 110;
+  note2.octave = 2;
+  note2.offset = 10;
+
+  note3.letter = 'D';
+  note3.frequency = 146.83;
+  note3.octave = 3;
+  note3.offset = 10;
+
+  note4.letter = 'G';
+  note4.frequency = 196;
+  note4.octave = 3;
+  note4.offset = 10;
+
+  note5.letter = 'B';
+  note5.frequency = 246.94;
+  note5.octave = 3;
+  note5.offset = 10;
+
+  note6.letter = 'E';
+  note6.frequency = 329.63;
+  note6.octave = 4;
+  note6.offset = 10;
+
+  invalidNote.letter = 'Z';
+  invalidNote.frequency = 999;
+  invalidNote.octave = 10;
+  invalidNote.offset = 10;
+
+  standard.name = "Standard";
+  standard.notes = {{
+    note1, note2, note3, note4, note5, note6
+  }};
+  standard.invalidNote = invalidNote;
+
   double peak = FFT.MajorPeak(vReal, SAMPLES, SAMPLING_FREQUENCY);
   double roundedPeak = round(peak);
-  Serial.println(roundedPeak);
 
   char roundedPeakStr[64];
   snprintf(roundedPeakStr, sizeof(roundedPeakStr), "%g", roundedPeak);
 
-  ws.textAll(roundedPeakStr);
-  displayDataOnLcdDisplay(roundedPeakStr);
+  Note closestNote = standard.getClosestNote(roundedPeak);
+
+  char closestNoteFullNameStr[64];
+  snprintf(closestNoteFullNameStr, sizeof(closestNoteFullNameStr), "%g", closestNote.getFullName());
+
+  char closestNoteFrequencyStr[64];
+  snprintf(closestNoteFrequencyStr, sizeof(closestNoteFrequencyStr), "%g", closestNote.frequency);
+
+  String instruction = standard.getInstruction(roundedPeak, closestNote.frequency).c_str();
+
+  displayDataOnLcdDisplay(closestNote.getFullName().c_str(), roundedPeakStr, instruction);
+
+  Serial.println(closestNoteFullNameStr);
+
+  String analyzedNoteData = "{frequency: " + String(roundedPeak) + ", closestNote: " + closestNote.getFullName().c_str() + ", instruction: " + instruction + '}';
+
+  // String all = String(roundedPeak) + " " + closestNote.getFullName().c_str() + " " + instruction;
+
+  ws.textAll(analyzedNoteData);
+
   delay(40); //do one time
 }
-  

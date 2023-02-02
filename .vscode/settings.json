@@ -1,6 +1,19 @@
 {
+  "C_Cpp.errorSquiggles": "disabled",
   "files.associations": {
+    "optional": "cpp",
+    "*.tcc": "cpp",
+    "istream": "cpp",
+    "ostream": "cpp",
+    "ratio": "cpp",
+    "system_error": "cpp",
+    "array": "cpp",
+    "functional": "cpp",
     "sstream": "cpp",
-    "regex": "cpp"
+    "regex": "cpp",
+    "tuple": "cpp",
+    "type_traits": "cpp",
+    "utility": "cpp",
+    "list": "cpp"
   }
 }
